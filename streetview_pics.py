@@ -1,6 +1,7 @@
 import numpy as np
 from argparse import ArgumentParser
 import pathlib
+import os
 import google_streetview.api
 from pyproj import Transformer
 
@@ -29,10 +30,9 @@ if __name__ == "__main__":
 
     blue_points = np.load("blue_points_indicies.npz")
 
-    lat, long = [],[]
     idx = np.random.randint(0,len(blue_points["x"]),args.N)
     lats, longs = get_lat_long(blue_points["x"][idx],blue_points["y"][idx])
-    print(lats,longs)
+
     params = [{
         'size': '640x640', # max 640x640 pixels
         'location': f'{lat},{long}',
@@ -41,5 +41,15 @@ if __name__ == "__main__":
     } for lat,long in zip(lats,longs)]
 
     results = google_streetview.api.results(params)
-    print(results.metadata)
+
+    real_lat = [results.metadata[i]["location"]["lat"] for i in range(len(results.metadata))]
+    real_long = [results.metadata[i]["location"]["lng"] for i in range(len(results.metadata))]
+
     results.download_links(args.download)
+
+    text = ""
+    for i in range(len(real_lat)):
+        text += str(real_lat[i])+" "+str(real_long[i])+"\n"
+
+    with open(os.path.join(args.download,"lat_long_images.txt"),'w') as f:
+        f.write(text)
