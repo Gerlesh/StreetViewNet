@@ -42,8 +42,8 @@ if __name__ == "__main__":
 
     results = google_streetview.api.results(params)
 
-    real_lat = [results.metadata[i]["location"]["lat"] for i in range(len(results.metadata))]
-    real_long = [results.metadata[i]["location"]["lng"] for i in range(len(results.metadata))]
+    real_lat = [results.metadata[i]["location"]["lat"] if "location" in results.metadata[i] else "Failed" for i in range(len(results.metadata))]
+    real_long = [results.metadata[i]["location"]["lng"] if "location" in results.metadata[i] else "Failed" for i in range(len(results.metadata))]
 
     results.download_links(args.download)
 
