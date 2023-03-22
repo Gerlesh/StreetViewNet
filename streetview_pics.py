@@ -32,24 +32,26 @@ if __name__ == "__main__":
 
     idx = np.random.randint(0,len(blue_points["x"]),args.N)
     lats, longs = get_lat_long(blue_points["x"][idx],blue_points["y"][idx])
+    headings = np.random.rand(args.N)*360
 
     params = [{
         'size': '640x640', # max 640x640 pixels
         'location': f'{lat},{long}',
         'key': args.key,
-        'radius': "50000"
-    } for lat,long in zip(lats,longs)]
+        'heading': str(heading),
+        'radius': "1000000"
+    } for lat,long,heading in zip(lats,longs,headings)]
 
     results = google_streetview.api.results(params)
 
-    real_lat = [results.metadata[i]["location"]["lat"] if "location" in results.metadata[i] else "Failed" for i in range(len(results.metadata))]
-    real_long = [results.metadata[i]["location"]["lng"] if "location" in results.metadata[i] else "Failed" for i in range(len(results.metadata))]
+    real_lat = [results.metadata[i]["location"]["lat"] if "location" in results.metadata[i] else str(lats[i]) for i in range(len(results.metadata))]
+    real_long = [results.metadata[i]["location"]["lng"] if "location" in results.metadata[i] else str(longs[i]) for i in range(len(results.metadata))]
 
     results.download_links(args.download)
 
     text = ""
     for i in range(len(real_lat)):
-        text += str(real_lat[i])+" "+str(real_long[i])+"\n"
+        text += str(real_lat[i])+" "+str(real_long[i])+" "+str(headings[i])+"\n"
 
     with open(os.path.join(args.download,"lat_long_images.txt"),'w') as f:
         f.write(text)
