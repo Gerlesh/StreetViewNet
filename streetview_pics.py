@@ -1,6 +1,5 @@
 import numpy as np
 from argparse import ArgumentParser
-import pathlib
 import os
 import google_streetview.api
 from pyproj import Transformer
@@ -20,13 +19,13 @@ def get_lat_long(x,y):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--key")
-    parser.add_argument("-d","--download",default=".",type=pathlib.Path)
+    parser.add_argument("-d","--download",default="dataset")
     parser.add_argument("-N", dest="N", default=1, type=int)
 
     args = parser.parse_args()
 
-    if not args.download.is_dir():
-        raise ValueError("Invalid download directory")
+    if not os.path.isdir(args.download):
+        os.mkdir(args.download)
 
     blue_points = np.load("blue_points_indicies.npz")
 
@@ -39,6 +38,7 @@ if __name__ == "__main__":
         'location': f'{lat},{long}',
         'key': args.key,
         'heading': str(heading),
+        'source': 'outdoor',
         'radius': "1000000"
     } for lat,long,heading in zip(lats,longs,headings)]
 
@@ -48,6 +48,12 @@ if __name__ == "__main__":
     real_long = [results.metadata[i]["location"]["lng"] if "location" in results.metadata[i] else str(longs[i]) for i in range(len(results.metadata))]
 
     results.download_links(args.download)
+    N = 0
+    for im in results.metadata:
+        if im["status"] == "OK":
+            N += 1
+
+    print(N,"Images Retreived")
 
     text = ""
     for i in range(len(real_lat)):
