@@ -8,12 +8,9 @@ TRANSFORMER = Transformer.from_crs("EPSG:3857","EPSG:4326")
 WIDTH,HEIGHT = 81664, 31776
 
 def get_lat_long(x,y):
-    # TODO: Get the lat and long from the x and y values
-
     lat, long = TRANSFORMER.transform((2*x/WIDTH-1)*20037508,(2*y/HEIGHT-260/335)*20037508*790/2040)
     # Random ratios taken from image measurements
     # [-20037508,20037508] is the range used by EPSG:3857 (Web Mercator Projection standard)
-    
     return (lat,long)
 
 if __name__ == "__main__":
