@@ -1,2 +1,3 @@
 datasets/
+.venv/
 kmeans22.sav
