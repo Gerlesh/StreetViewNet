@@ -34,9 +34,9 @@ if __name__ == "__main__":
         'size': '640x640', # max 640x640 pixels
         'location': f'{lat},{long}',
         'key': args.key,
-        'heading': str(heading),
         'source': 'outdoor',
-        'radius': "1000000"
+        'heading': str(heading),
+        'radius': "1000"
     } for lat,long,heading in zip(lats,longs,headings)]
 
     results = google_streetview.api.results(params)
