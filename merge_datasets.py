@@ -14,7 +14,11 @@ def rename_files(dir):
 				file = os.path.join(dir, subdir, filename)
 				data = ' '.join(lines[number].split(" ")[:2])
 				new_name = os.path.join(sys.argv[1], subdir, data+".jpg")
-				os.rename(file,new_name)
+				if os.path.isfile(new_name):
+					print("File already exists: ", new_name)
+					os.remove(file)
+				else:
+					os.rename(file,new_name)
 
 def flatten_datset(dir):
 	for subdir in os.listdir(dir):
@@ -23,7 +27,11 @@ def flatten_datset(dir):
 				continue
 			old_name = os.path.join(dir,subdir,filename)
 			new_name = os.path.join(dir,filename)
-			os.rename(old_name,new_name)
+			if os.path.isfile(new_name):
+				print("File already exists: ", new_name)
+				os.remove(old_name)
+			else:
+				os.rename(old_name,new_name)
 
 		shutil.rmtree(os.path.join(dir,subdir))
 

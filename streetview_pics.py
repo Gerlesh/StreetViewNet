@@ -36,7 +36,7 @@ if __name__ == "__main__":
         'key': args.key,
         'source': 'outdoor',
         'heading': str(heading),
-        'radius': "1000"
+        'radius': "20000"
     } for lat,long,heading in zip(lats,longs,headings)]
 
     results = google_streetview.api.results(params)
