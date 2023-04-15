@@ -3,3 +3,4 @@ dataset/
 .venv/
 kmeans22.sav
 testdataset
+resized
