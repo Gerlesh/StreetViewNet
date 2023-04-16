@@ -1,10 +1,23 @@
-from typing import Any, Callable, List, Optional, Type, Union
+from typing import Any, Callable, List, Optional, Type, Union, Tuple
+import os
+import random
 
 import torch
 import torch.nn as nn
 # import torch.nn.functional as F
 from torch import Tensor
-import random
+import torchvision.transforms as transforms
+
+from PIL import Image
+from tqdm import tqdm
+
+DATA_FOLDER = "resized"
+IMAGE_SIZE = 256
+NUM_CLASSES = 22
+NUM_CONFIGS = 100
+EPOCHS = 50
+BATCH_SIZE = 40
+
 
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1) -> nn.Conv2d:
     """3x3 convolution with padding"""
@@ -24,6 +37,7 @@ def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
+
 class BasicBlock(nn.Module):
     expansion: int = 1
 
@@ -42,9 +56,11 @@ class BasicBlock(nn.Module):
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         if groups != 1 or base_width != 64:
-            raise ValueError("BasicBlock only supports groups=1 and base_width=64")
+            raise ValueError(
+                "BasicBlock only supports groups=1 and base_width=64")
         if dilation > 1:
-            raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
+            raise NotImplementedError(
+                "Dilation > 1 not supported in BasicBlock")
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = norm_layer(planes)
@@ -71,7 +87,8 @@ class BasicBlock(nn.Module):
         out = self.relu(out)
 
         return out
-    
+
+
 class Bottleneck(nn.Module):
     # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
     # while original implementation places the stride at the first 1x1 convolution(self.conv1)
@@ -160,20 +177,26 @@ class ResNet(nn.Module):
             )
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
+        self.conv1 = nn.Conv2d(
+            3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0])
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1])
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
+        self.layer2 = self._make_layer(
+            block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0])
+        self.layer3 = self._make_layer(
+            block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1])
+        self.layer4 = self._make_layer(
+            block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.softmax = nn.Softmax(1)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                nn.init.kaiming_normal_(
+                    m.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
@@ -184,9 +207,11 @@ class ResNet(nn.Module):
         if zero_init_residual:
             for m in self.modules():
                 if isinstance(m, Bottleneck) and m.bn3.weight is not None:
-                    nn.init.constant_(m.bn3.weight, 0)  # type: ignore[arg-type]
+                    # type: ignore[arg-type]
+                    nn.init.constant_(m.bn3.weight, 0)
                 elif isinstance(m, BasicBlock) and m.bn2.weight is not None:
-                    nn.init.constant_(m.bn2.weight, 0)  # type: ignore[arg-type]
+                    # type: ignore[arg-type]
+                    nn.init.constant_(m.bn2.weight, 0)
 
     def _make_layer(
         self,
@@ -244,6 +269,7 @@ class ResNet(nn.Module):
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
+        x = self.softmax(x)
 
         return x
 
@@ -286,19 +312,56 @@ def _resnet(
 
 #     return _resnet(Bottleneck, [3, 4, 23, 3], **kwargs)
 
+
+def get_batches(batch_size: int) -> Tuple[Tuple[str]]:
+    files = os.listdir(DATA_FOLDER)
+    batches = []
+    for i in range(1, len(files)//batch_size):
+        batches.append(tuple(files[(i-1)*batch_size:i*batch_size]))
+
+    if len(batches[-1]) < batch_size:
+        batches.pop(-1)
+
+    return tuple(batches)
+
+
+def load_images(batch: Tuple[str]) -> Tuple[torch.Tensor, torch.Tensor]:
+    data = torch.zeros((len(batch), 3, IMAGE_SIZE, IMAGE_SIZE))
+    labels = torch.zeros((len(batch), NUM_CLASSES))
+    transform = transforms.ToTensor()
+    for i, im in enumerate(batch):
+        image = Image.open(os.path.join(DATA_FOLDER, im))
+        data[i, :, :, :] = transform(image)
+        labels[i, int(im[:-4].split()[2])] = 1
+
+    return data, labels
+
+
+def train_test_split(batches: Tuple[Tuple[str]], train_ratio: float = 0.8) -> Tuple[Tuple[Tuple[str]], Tuple[Tuple[str]]]:
+    train_set = tuple(random.choices(batches, k=int(train_ratio*len(batches))))
+    test_set = tuple([b for b in batches if b not in train_set])
+
+    return train_set, test_set
+
+
 if __name__ == '__main__':
     torch.manual_seed(0)
-    input = (torch.randint(255, (10, 3, 640, 640))).float()
-    loss_func = nn.CrossEntropyLoss()
-    labels = (torch.randint(21, (10,)))
+    torch.cuda.manual_seed(0)
+    random.seed(0)
 
-    valid_input = (torch.randint(255, (3, 3, 640, 640))).float()
-    valid_labels = (torch.randint(21, (3,)))
+    batches = get_batches(BATCH_SIZE)
+    train_set, test_set = train_test_split(batches)
+    valid_set, test_set = train_test_split(test_set, 0.5)
+
+    loss_func = nn.CrossEntropyLoss()
 
     struct_list = [Bottleneck, BasicBlock]
 
     # Hyperparameter Tuning Loop
-    for _ in range(100):
+    hyperparameters = []
+    losses = []
+    for i in range(NUM_CONFIGS):
+        print("Model", i)
         var1 = random.randint(2, 8)
         var2 = random.randint(3, 10)
         var3 = random.randint(12, 30)
@@ -311,58 +374,85 @@ if __name__ == '__main__':
         var9 = 1 - pow(10, (-2 * random.random() - 1))
         var10 = random.random()
 
-        net = _resnet(struct_list[var5], [var1, var2, var3, var4])
-        if(var6 == 0):
+        net = _resnet(struct_list[var5], [var1, var2, var3, var4]).cuda()
+        if (var6 == 0):
             optimizer = torch.optim.SGD(net.parameters(), lr=var7)
-        elif(var6 == 1):
-            optimizer = torch.optim.SGD(net.parameters(), lr=var7, momentum=var10)
-        elif(var6 == 2):
-            optimizer = torch.optim.Adam(net.parameters(), lr=var7, betas=(var8, var9))
-        elif(var6 == 3):
-            optimizer = torch.optim.AdamW(net.parameters(), lr=var7, betas=(var8, var9))
-        
+        elif (var6 == 1):
+            optimizer = torch.optim.SGD(
+                net.parameters(), lr=var7, momentum=var10)
+        elif (var6 == 2):
+            optimizer = torch.optim.Adam(
+                net.parameters(), lr=var7, betas=(var8, var9))
+        else:
+            optimizer = torch.optim.AdamW(
+                net.parameters(), lr=var7, betas=(var8, var9))
+
         min_loss = float('inf')
         count = 0
-        for i in range(10):
-            # To be implemented: Another loop for batching, right now only 10 "images" so batch is full dataset
-            optimizer.zero_grad()
-            output = net(input)
-            loss = loss_func(output, labels)
-            loss.backward()
-            optimizer.step()
-            check = 0
-            valid_output = net(valid_input)
-            valid_loss = loss_func(valid_output, valid_labels)
-            if(valid_loss < min_loss):
+        for j in range(EPOCHS):
+            for batch in tqdm(train_set, desc="Epoch "+str(j)):
+                optimizer.zero_grad()
+                data, labels = load_images(batch)
+                output = net(data.cuda())
+                loss = loss_func(output, labels.cuda())
+                loss.backward()
+                optimizer.step()
+
+            valid_loss = 0
+            for batch in valid_set:
+                data, valid_labels = load_images(batch)
+                with torch.no_grad():
+                    valid_output = net(data.cuda())
+                    loss = loss_func(valid_output,
+                                     valid_labels.cuda())
+                    valid_loss += loss.item()
+
+            valid_loss /= len(valid_set)
+            print("Epoch", j, "Validation loss:", valid_loss)
+
+            if (valid_loss < min_loss):
                 min_loss = valid_loss
                 count = 0
             count += 1
-            if(count == 5):
-                break # if 5 epochs without better validation_performance, finish training
-        
-        valid_output = net(valid_input)
+            if (count == 5):
+                break  # if 5 epochs without better validation_performance, finish training
+
         total = 0
         correct = 0
-        for i in range(len(valid_output)):
-            val = torch.argmax(valid_output[i])
-            if(val == valid_labels[i]):
-                correct += 1
-            total += 1
+        valid_loss = 0
+        for batch in valid_set:
+            data, valid_labels = load_images(batch)
+            with torch.no_grad():
+                valid_output = net(data.cuda())
+                valid_loss += loss_func(valid_output,
+                                        valid_labels.cuda()).item()
+
+            for i in range(len(valid_output)):
+                val = torch.argmax(valid_output[i])
+                label = torch.argmax(valid_labels[i])
+                if (val == label):
+                    correct += 1
+                total += 1
+
+        valid_loss /= len(valid_set)
+
         success_rate = correct / total
-        print("The sucessrate rate for this iteration is %.3f", success_rate)
-        # To be implemented: store accuracy and hyperparameter pairs to be analyzed and chosen
-        
-        
+        print("The sucess rate for this iteration is", success_rate)
+        print("The validation loss for this iteration is", valid_loss)
 
+        losses.append(valid_loss)
+        hyperparameters.append(
+            (var1, var2, var3, var4, var5, var6, var6, var8, var9, var10)
+        )
 
-    net = _resnet(Bottleneck, [3, 4, 23, 3])
-    optimizer = torch.optim.SGD(net.parameters(), lr=0.01)
+    print(hyperparameters[torch.argmin(torch.Tensor(losses))])
 
-    for i in range(10):
-        optimizer.zero_grad()
-        output = net(input)
-        loss = loss_func(output, labels)
-        loss.backward()
-        optimizer.step()
-        check = 0
-
+    # net = _resnet(Bottleneck, [3, 4, 23, 3]).cuda()
+    # optimizer = torch.optim.SGD(net.parameters(), lr=0.01)
+    #
+    # for i in range(10):
+    #     optimizer.zero_grad()
+    #     output = net(input)
+    #     loss = loss_func(output, labels)
+    #     loss.backward()
+    #     optimizer.step()
