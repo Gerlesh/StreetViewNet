@@ -16,7 +16,7 @@ IMAGE_SIZE = 256
 NUM_CLASSES = 22
 NUM_CONFIGS = 100
 EPOCHS = 50
-BATCH_SIZE = 40
+BATCH_SIZE = 25
 
 
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1) -> nn.Conv2d:
@@ -313,8 +313,8 @@ def _resnet(
 #     return _resnet(Bottleneck, [3, 4, 23, 3], **kwargs)
 
 
-def get_batches(batch_size: int) -> Tuple[Tuple[str]]:
-    files = os.listdir(DATA_FOLDER)
+def get_batches(batch_size: int, data_folder: str) -> Tuple[Tuple[str]]:
+    files = os.listdir(data_folder)
     batches = []
     for i in range(1, len(files)//batch_size):
         batches.append(tuple(files[(i-1)*batch_size:i*batch_size]))
@@ -349,7 +349,7 @@ if __name__ == '__main__':
     torch.cuda.manual_seed(0)
     random.seed(0)
 
-    batches = get_batches(BATCH_SIZE)
+    batches = get_batches(BATCH_SIZE, DATA_FOLDER)
     train_set, test_set = train_test_split(batches)
     valid_set, test_set = train_test_split(test_set, 0.5)
 
@@ -373,6 +373,7 @@ if __name__ == '__main__':
         var8 = 1 - pow(10, (-2 * random.random() - 0.5))
         var9 = 1 - pow(10, (-2 * random.random() - 1))
         var10 = random.random()
+        print((var1, var2, var3, var4, var5, var6, var6, var8, var9, var10))
 
         net = _resnet(struct_list[var5], [var1, var2, var3, var4]).cuda()
         if (var6 == 0):
@@ -427,17 +428,14 @@ if __name__ == '__main__':
                 valid_loss += loss_func(valid_output,
                                         valid_labels.cuda()).item()
 
-            for i in range(len(valid_output)):
-                val = torch.argmax(valid_output[i])
-                label = torch.argmax(valid_labels[i])
-                if (val == label):
-                    correct += 1
-                total += 1
+            correct += torch.sum(torch.argmax(valid_output, dim=1) ==
+                                 torch.argmax(valid_labels.cuda(), dim=1)).item()
+            total += valid_labels.size(0)
 
         valid_loss /= len(valid_set)
 
         success_rate = correct / total
-        print("The sucess rate for this iteration is", success_rate)
+        print("The success rate for this iteration is", success_rate)
         print("The validation loss for this iteration is", valid_loss)
 
         losses.append(valid_loss)
