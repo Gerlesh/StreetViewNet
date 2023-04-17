@@ -18,6 +18,8 @@ NUM_CONFIGS = 100
 EPOCHS = 50
 BATCH_SIZE = 32
 
+# Most of the ResNet building code comes from https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py
+
 
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1) -> nn.Conv2d:
     """3x3 convolution with padding"""
@@ -287,31 +289,6 @@ def _resnet(
 
     return model
 
-# def resnet101(*,  progress: bool = False, **kwargs: Any) -> ResNet:
-#     """ResNet-101 from `Deep Residual Learning for Image Recognition <https://arxiv.org/pdf/1512.03385.pdf>`__.
-#     .. note::
-#        The bottleneck of TorchVision places the stride for downsampling to the second 3x3
-#        convolution while the original paper places it to the first 1x1 convolution.
-#        This variant improves the accuracy and is known as `ResNet V1.5
-#        <https://ngc.nvidia.com/catalog/model-scripts/nvidia:resnet_50_v1_5_for_pytorch>`_.
-#     Args:
-#         weights (:class:`~torchvision.models.ResNet101_Weights`, optional): The
-#             pretrained weights to use. See
-#             :class:`~torchvision.models.ResNet101_Weights` below for
-#             more details, and possible values. By default, no pre-trained
-#             weights are used.
-#         progress (bool, optional): If True, displays a progress bar of the
-#             download to stderr. Default is True.
-#         **kwargs: parameters passed to the ``torchvision.models.resnet.ResNet``
-#             base class. Please refer to the `source code
-#             <https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py>`_
-#             for more details about this class.
-#     .. autoclass:: torchvision.models.ResNet101_Weights
-#         :members:
-#     """
-
-#     return _resnet(Bottleneck, [3, 4, 23, 3], **kwargs)
-
 
 def get_batches(batch_size: int, data_folder: str) -> Tuple[Tuple[str]]:
     files = os.listdir(data_folder)
@@ -419,6 +396,7 @@ if __name__ == '__main__':
     hyperparameters = []
     losses = []
     for i in range(NUM_CONFIGS):
+        # Hyperparameter random search
         print("Model", i)
         var1 = random.randint(2, 8)
         var2 = random.randint(3, 10)
@@ -430,7 +408,8 @@ if __name__ == '__main__':
         var8 = 1 - pow(10, (-2 * random.random() - 0.5))
         var9 = 1 - pow(10, (-2 * random.random() - 1))
         var10 = random.random()
-        print((var1, var2, var3, var4, var5, var6, var7, var8, var9, var10))
+        print("Hyperparameter vars:", (var1, var2, var3,
+              var4, var5, var6, var7, var8, var9, var10))
 
         net = _resnet(struct_list[var5], [var1, var2, var3, var4]).cuda()
         if (var6 == 0):
@@ -457,121 +436,13 @@ if __name__ == '__main__':
             if (count == 5):
                 break  # if 5 epochs without better validation_performance, finish training
 
-        loss_fn = nn.CrossEntropyLoss()
-        total_loss = 0
-        total_correct = 0
-        total_pred = 0
-        pbar = tqdm(enumerate(valid_set), total=len(valid_set))
-        for i, batch in pbar:
-            data, labels = load_images(batch)
-
-            with torch.cuda.amp.autocast():
-                with torch.no_grad():
-                    pred = net(data.cuda())
-                    loss = loss_fn(pred, labels.cuda())
-                    correct = torch.sum(torch.argmax(pred, dim=1) ==
-                                        torch.argmax(labels.cuda(), dim=1))
-
-            total = labels.size(0)
-
-            total_loss += loss.item()
-            total_correct += correct.item()
-            total_pred += total
-
-            pbar.set_description(
-                f'Model {i} Validation, Loss {loss.item():.4f}({total_loss:.4f}), Accuracy {correct.item()/total:.4f}({total_correct / total_pred:.4f})')
-
-        if not losses or total_loss <= min(losses):
+        if not losses or min_loss <= min(losses):
             torch.save(net.state_dict(), "net.pt")
 
-        losses.append(total_loss)
+        losses.append(min_loss)
         hyperparameters.append(
             (var1, var2, var3, var4, var5, var6, var7, var8, var9, var10)
         )
 
-    print(hyperparameters[torch.argmin(torch.Tensor(losses))])
-
-    # var1, var2, var3, var4, var5, var6, var7, var8, var9, var10 = (
-    #     8, 10, 30, 8, 1, 3, 1e-04, 0.995, 0.925, 0.175)
-    # net = _resnet(struct_list[var5], [var1, var2, var3, var4]).cuda()
-    # if (var6 == 0):
-    #     optimizer = torch.optim.SGD(net.parameters(), lr=var7)
-    # elif (var6 == 1):
-    #     optimizer = torch.optim.SGD(
-    #         net.parameters(), lr=var7, momentum=var10)
-    # elif (var6 == 2):
-    #     optimizer = torch.optim.Adam(
-    #         net.parameters(), lr=var7, betas=(var8, var9))
-    # else:
-    #     optimizer = torch.optim.AdamW(
-    #         net.parameters(), lr=var7, betas=(var8, var9))
-    #
-    # min_loss = float('inf')
-    # count = 0
-    # try:
-    #     for j in range(EPOCHS):
-    #         for batch in tqdm(train_set, desc="Epoch "+str(j)):
-    #             optimizer.zero_grad()
-    #             data, labels = load_images(batch)
-    #             output = net(data.cuda())
-    #             loss = loss_func(output, labels.cuda())
-    #             loss.backward()
-    #             optimizer.step()
-    #
-    #         total = 0
-    #         correct = 0
-    #         valid_loss = 0
-    #         for batch in valid_set:
-    #             data, valid_labels = load_images(batch)
-    #             with torch.no_grad():
-    #                 valid_output = net(data.cuda())
-    #                 valid_loss += loss_func(valid_output,
-    #                                         valid_labels.cuda()).item()
-    #
-    #             correct += torch.sum(torch.argmax(valid_output, dim=1) ==
-    #                                  torch.argmax(valid_labels.cuda(), dim=1)).item()
-    #             total += valid_labels.size(0)
-    #
-    #         valid_loss /= len(valid_set)
-    #         success_rate = correct / total
-    #         print("Epoch", j, "Validation loss:",
-    #               valid_loss, "Accuracy:", success_rate)
-    #
-    #         if (valid_loss < min_loss):
-    #             min_loss = valid_loss
-    #             count = 0
-    #         count += 1
-    #         if (count == 5):
-    #             break  # if 5 epochs without better validation_performance, finish training
-    # except KeyboardInterrupt:
-    #     pass
-    #
-    # total = 0
-    # correct = 0
-    # valid_loss = 0
-    # for batch in valid_set:
-    #     data, valid_labels = load_images(batch)
-    #     with torch.no_grad():
-    #         valid_output = net(data.cuda())
-    #         valid_loss += loss_func(valid_output,
-    #                                 valid_labels.cuda()).item()
-    #
-    #     correct += torch.sum(torch.argmax(valid_output, dim=1) ==
-    #                          torch.argmax(valid_labels.cuda(), dim=1)).item()
-    #     total += valid_labels.size(0)
-    #
-    # valid_loss /= len(valid_set)
-    #
-    # success_rate = correct / total
-    # print("The success rate for this iteration is", success_rate)
-    # print("The validation loss for this iteration is", valid_loss)
-
-    # net = _resnet(Bottleneck, [3, 4, 23, 3]).cuda()
-    # optimizer = torch.optim.SGD(net.parameters(), lr=0.01)
-    #
-    # for i in range(10):
-    #     optimizer.zero_grad()
-    #     output = net(input)
-    #     loss = loss_func(output, labels)
-    #     loss.backward()
-    #     optimizer.step()
+    print("Best hyperparameter vars:",
+          hyperparameters[torch.argmin(torch.Tensor(losses))])
