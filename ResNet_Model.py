@@ -16,7 +16,7 @@ IMAGE_SIZE = 256
 NUM_CLASSES = 22
 NUM_CONFIGS = 100
 EPOCHS = 50
-BATCH_SIZE = 25
+BATCH_SIZE = 32
 
 
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1) -> nn.Conv2d:
@@ -152,7 +152,7 @@ class ResNet(nn.Module):
         self,
         block: Type[Union[BasicBlock, Bottleneck]],
         layers: List[int],
-        num_classes: int = 22,
+        num_classes: int = NUM_CLASSES,
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
@@ -337,23 +337,81 @@ def load_images(batch: Tuple[str]) -> Tuple[torch.Tensor, torch.Tensor]:
     return data, labels
 
 
-def train_test_split(batches: Tuple[Tuple[str]], train_ratio: float = 0.8) -> Tuple[Tuple[Tuple[str]], Tuple[Tuple[str]]]:
+def train_test_split(batches: Tuple[Tuple[str]], train_ratio: float = 0.9) -> Tuple[Tuple[Tuple[str]], Tuple[Tuple[str]]]:
     train_set = tuple(random.choices(batches, k=int(train_ratio*len(batches))))
     test_set = tuple([b for b in batches if b not in train_set])
 
     return train_set, test_set
 
 
+def train_epoch(model, train_set, valid_set, optimizer, epoch):
+    model.train()
+    loss_fn = nn.CrossEntropyLoss()
+    scaler = torch.cuda.amp.GradScaler()
+    total_loss = 0
+    total_correct = 0
+    total_pred = 0
+    pbar = tqdm(enumerate(train_set), total=len(train_set))
+    for i, batch in pbar:
+        data, labels = load_images(batch)
+
+        optimizer.zero_grad()
+        with torch.cuda.amp.autocast():
+            pred = model(data.cuda())
+            loss = loss_fn(pred, labels.cuda())
+            correct = torch.sum(torch.argmax(pred, dim=1) ==
+                                torch.argmax(labels.cuda(), dim=1))
+
+        if loss != loss:
+            print(data)
+            print(pred)
+        total = labels.size(0)
+
+        total_loss += loss.item()
+        total_correct += correct.item()
+        total_pred += total
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+
+        pbar.set_description(
+            f'Epoch {epoch}, Loss {loss.item():.4f}({total_loss / (i + 1):.4f}), Accuracy {correct.item()/total:.4f}({total_correct / total_pred:.4f})')
+
+    total_loss = 0
+    total_correct = 0
+    total_pred = 0
+    pbar = tqdm(enumerate(valid_set), total=len(valid_set))
+    for i, batch in pbar:
+        data, labels = load_images(batch)
+
+        with torch.cuda.amp.autocast():
+            with torch.no_grad():
+                pred = model(data.cuda())
+                loss = loss_fn(pred, labels.cuda())
+                correct = torch.sum(torch.argmax(pred, dim=1) ==
+                                    torch.argmax(labels.cuda(), dim=1))
+
+        total = labels.size(0)
+
+        total_loss += loss.item()
+        total_correct += correct.item()
+        total_pred += total
+
+        pbar.set_description(
+            f'Epoch {epoch} Validation, Loss {loss.item():.4f}({total_loss / (i + 1):.4f}), Accuracy {correct.item()/total:.4f}({total_correct / total_pred:.4f})')
+
+    return total_loss/len(valid_set)
+
+
 if __name__ == '__main__':
-    torch.manual_seed(0)
-    torch.cuda.manual_seed(0)
-    random.seed(0)
+    torch.set_float32_matmul_precision('medium')
+    torch.random.manual_seed(1)
+    torch.cuda.manual_seed(1)
+    random.seed(1)
 
     batches = get_batches(BATCH_SIZE, DATA_FOLDER)
-    train_set, test_set = train_test_split(batches)
-    valid_set, test_set = train_test_split(test_set, 0.5)
-
-    loss_func = nn.CrossEntropyLoss()
+    train_set, valid_set = train_test_split(batches)
 
     struct_list = [Bottleneck, BasicBlock]
 
@@ -365,7 +423,6 @@ if __name__ == '__main__':
         var1 = random.randint(2, 8)
         var2 = random.randint(3, 10)
         var3 = random.randint(12, 30)
-        var3 = random.randint(12, 18)
         var4 = random.randint(2, 8)
         var5 = random.randint(0, 1)
         var6 = random.randint(0, 3)
@@ -373,7 +430,7 @@ if __name__ == '__main__':
         var8 = 1 - pow(10, (-2 * random.random() - 0.5))
         var9 = 1 - pow(10, (-2 * random.random() - 1))
         var10 = random.random()
-        print((var1, var2, var3, var4, var5, var6, var6, var8, var9, var10))
+        print((var1, var2, var3, var4, var5, var6, var7, var8, var9, var10))
 
         net = _resnet(struct_list[var5], [var1, var2, var3, var4]).cuda()
         if (var6 == 0):
@@ -391,25 +448,7 @@ if __name__ == '__main__':
         min_loss = float('inf')
         count = 0
         for j in range(EPOCHS):
-            for batch in tqdm(train_set, desc="Epoch "+str(j)):
-                optimizer.zero_grad()
-                data, labels = load_images(batch)
-                output = net(data.cuda())
-                loss = loss_func(output, labels.cuda())
-                loss.backward()
-                optimizer.step()
-
-            valid_loss = 0
-            for batch in valid_set:
-                data, valid_labels = load_images(batch)
-                with torch.no_grad():
-                    valid_output = net(data.cuda())
-                    loss = loss_func(valid_output,
-                                     valid_labels.cuda())
-                    valid_loss += loss.item()
-
-            valid_loss /= len(valid_set)
-            print("Epoch", j, "Validation loss:", valid_loss)
+            valid_loss = train_epoch(net, train_set, valid_set, optimizer, j)
 
             if (valid_loss < min_loss):
                 min_loss = valid_loss
@@ -418,32 +457,114 @@ if __name__ == '__main__':
             if (count == 5):
                 break  # if 5 epochs without better validation_performance, finish training
 
-        total = 0
-        correct = 0
-        valid_loss = 0
-        for batch in valid_set:
-            data, valid_labels = load_images(batch)
-            with torch.no_grad():
-                valid_output = net(data.cuda())
-                valid_loss += loss_func(valid_output,
-                                        valid_labels.cuda()).item()
+        loss_fn = nn.CrossEntropyLoss()
+        total_loss = 0
+        total_correct = 0
+        total_pred = 0
+        pbar = tqdm(enumerate(valid_set), total=len(valid_set))
+        for i, batch in pbar:
+            data, labels = load_images(batch)
 
-            correct += torch.sum(torch.argmax(valid_output, dim=1) ==
-                                 torch.argmax(valid_labels.cuda(), dim=1)).item()
-            total += valid_labels.size(0)
+            with torch.cuda.amp.autocast():
+                with torch.no_grad():
+                    pred = net(data.cuda())
+                    loss = loss_fn(pred, labels.cuda())
+                    correct = torch.sum(torch.argmax(pred, dim=1) ==
+                                        torch.argmax(labels.cuda(), dim=1))
 
-        valid_loss /= len(valid_set)
+            total = labels.size(0)
 
-        success_rate = correct / total
-        print("The success rate for this iteration is", success_rate)
-        print("The validation loss for this iteration is", valid_loss)
+            total_loss += loss.item()
+            total_correct += correct.item()
+            total_pred += total
 
-        losses.append(valid_loss)
+            pbar.set_description(
+                f'Model {i} Validation, Loss {loss.item():.4f}({total_loss:.4f}), Accuracy {correct.item()/total:.4f}({total_correct / total_pred:.4f})')
+
+        if not losses or total_loss <= min(losses):
+            torch.save(net.state_dict(), "net.pt")
+
+        losses.append(total_loss)
         hyperparameters.append(
-            (var1, var2, var3, var4, var5, var6, var6, var8, var9, var10)
+            (var1, var2, var3, var4, var5, var6, var7, var8, var9, var10)
         )
 
     print(hyperparameters[torch.argmin(torch.Tensor(losses))])
+
+    # var1, var2, var3, var4, var5, var6, var7, var8, var9, var10 = (
+    #     8, 10, 30, 8, 1, 3, 1e-04, 0.995, 0.925, 0.175)
+    # net = _resnet(struct_list[var5], [var1, var2, var3, var4]).cuda()
+    # if (var6 == 0):
+    #     optimizer = torch.optim.SGD(net.parameters(), lr=var7)
+    # elif (var6 == 1):
+    #     optimizer = torch.optim.SGD(
+    #         net.parameters(), lr=var7, momentum=var10)
+    # elif (var6 == 2):
+    #     optimizer = torch.optim.Adam(
+    #         net.parameters(), lr=var7, betas=(var8, var9))
+    # else:
+    #     optimizer = torch.optim.AdamW(
+    #         net.parameters(), lr=var7, betas=(var8, var9))
+    #
+    # min_loss = float('inf')
+    # count = 0
+    # try:
+    #     for j in range(EPOCHS):
+    #         for batch in tqdm(train_set, desc="Epoch "+str(j)):
+    #             optimizer.zero_grad()
+    #             data, labels = load_images(batch)
+    #             output = net(data.cuda())
+    #             loss = loss_func(output, labels.cuda())
+    #             loss.backward()
+    #             optimizer.step()
+    #
+    #         total = 0
+    #         correct = 0
+    #         valid_loss = 0
+    #         for batch in valid_set:
+    #             data, valid_labels = load_images(batch)
+    #             with torch.no_grad():
+    #                 valid_output = net(data.cuda())
+    #                 valid_loss += loss_func(valid_output,
+    #                                         valid_labels.cuda()).item()
+    #
+    #             correct += torch.sum(torch.argmax(valid_output, dim=1) ==
+    #                                  torch.argmax(valid_labels.cuda(), dim=1)).item()
+    #             total += valid_labels.size(0)
+    #
+    #         valid_loss /= len(valid_set)
+    #         success_rate = correct / total
+    #         print("Epoch", j, "Validation loss:",
+    #               valid_loss, "Accuracy:", success_rate)
+    #
+    #         if (valid_loss < min_loss):
+    #             min_loss = valid_loss
+    #             count = 0
+    #         count += 1
+    #         if (count == 5):
+    #             break  # if 5 epochs without better validation_performance, finish training
+    # except KeyboardInterrupt:
+    #     pass
+    #
+    # total = 0
+    # correct = 0
+    # valid_loss = 0
+    # for batch in valid_set:
+    #     data, valid_labels = load_images(batch)
+    #     with torch.no_grad():
+    #         valid_output = net(data.cuda())
+    #         valid_loss += loss_func(valid_output,
+    #                                 valid_labels.cuda()).item()
+    #
+    #     correct += torch.sum(torch.argmax(valid_output, dim=1) ==
+    #                          torch.argmax(valid_labels.cuda(), dim=1)).item()
+    #     total += valid_labels.size(0)
+    #
+    # valid_loss /= len(valid_set)
+    #
+    # success_rate = correct / total
+    # print("The success rate for this iteration is", success_rate)
+    # print("The validation loss for this iteration is", valid_loss)
 
     # net = _resnet(Bottleneck, [3, 4, 23, 3]).cuda()
     # optimizer = torch.optim.SGD(net.parameters(), lr=0.01)
